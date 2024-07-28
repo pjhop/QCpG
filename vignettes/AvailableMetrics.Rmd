@@ -1,0 +1,43 @@
+---
+title: "Available metrics"
+description: >
+  A description of the metrics available in the sample QC as well as the probe QC. 
+bibliography: ../app.bib
+---
+
+# Sample QC
+
+-   **PCA**
+
+    -   *Control probe PCA*: PCA performed on the various control probes that are present on the array, thereby measuring and summarizing various sources of technical variation.
+    -   *Array-wide PCA*: PCA performed on all probes on the array. By default, array-wide PCA is not performed (`calculate_PCs = FALSE`), since this significantly increases the amount of working memory required. If you have enough RAM available, we recommend setting `calculate_PCs = TRUE`. RAM usage can be reduced by specifying the `n_probes_PCA` which specifies the number of most variable probes to perform PCA on. Control probe PCA is always performed, since it only requires a small number of probes. Usually, control probe PCA gives a good indication of technical variation or outliers.
+
+-   **Sex**: Median X and Y copy number, as implemented in the [minfi](https://bioconductor.org/packages/release/bioc/html/minfi.html) package [@aryee_minfi_2014]. The lower plot shows the difference (median(Y) - median(X)), by default samples with diff \< -2 are classified as females.
+
+-   **MU**: Median methylated signal vs. median unmethylated signal.
+
+-   **RG**: Median green vs median red signal. Note that these intensities are calculated in type I probes. Since both unmethylated and methylated signals are measured using the same color in type I probes, the sum of the M and U signals in these probes should be invariant with respect to actual methylation levels (in contrast to the MU plot).
+
+-   **OP**: Rotated OP plot based on non-polymorphic control probes as implemented in the [MethylAid](https://bioconductor.org/packages/release/bioc/html/MethylAid.html) package [@van_iterson_methylaid_2014].
+
+-   **HC**: Rotated HC plot based on hybridization control probes (sample-independent as implemented in the [MethylAid](https://bioconductor.org/packages/release/bioc/html/MethylAid.html) package [@van_iterson_methylaid_2014].
+
+-   **bscon**: bscon metric from the [wateRmelon](https://www.bioconductor.org/packages/release/bioc/html/wateRmelon.html) package, which measures bisulfite conversion efficiency [@pidsley_data-driven_2013].
+
+-   **detP**: Percentage of probes with detection P-value \> threshold. This threshold can be set using the `detP_threshold` parameter in the `getQCmetrics()` function.
+
+-   **beadNr**: Percentage of probes with beadNr \< threshold. This threshold can be set using the `beadNr_threshold` parameter in the `getQCmetrics()` function.
+
+-   **IBS**: For each sample, DNAm-derived SNPs are compared with genotype array/WGS SNPs by IBS (identity by state), as implemented in the [omicsPrint](https://www.bioconductor.org/packages/release/bioc/html/omicsPrint.html) package. Note that this tab will be blank if no genotype data is supplied [@van_iterson_omicsprint_2018].
+
+-   **Custom**: Use columns included in the samplesheet as additional QC metrics (should be coded as TRUE/FALSE)
+
+**PMS**: Contains predicted phenotypes (poly-methylation scores): three age predictors [@horvath_dna_2013m, @zhang_improved_2019], smoking [@bollepalli_epismoker_2019], alcohol [@liu_dna_2018], BMI [@hamilton_epigenetic_2019], and white blood cell fractions [@zheng_identification_2018].
+
+# Probe QC
+
+-   **detP**: Percentage of samples with detection *P*-value \> threshold.
+-   **beadNr**: Percentage of samples with beadNr \<= threshold.
+-   **Masking**: Define probes that should me masked based on cross-reactivity, SNPs in probes and mapping issues. Currently the annotation by Zhou *et al.* is included [@zhou_comprehensive_2017].
+
+# References

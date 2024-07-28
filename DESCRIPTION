@@ -1,0 +1,49 @@
+Package: QCpG
+Title: Package for performing and visualizing DNAm array QC
+Version: 1.0.0
+Authors@R: person("Paul", "Hop", email = "p.j.hop-2@umcutrecht.nl", role = c("aut", "cre"))
+Description: This package aims to bring several sample/probeQC metrics for Illumina methylation beadchips (450k/EPIC) together (MethylAid, minfi, wateRmelon, omicsPrint), and includes new QC metrics and recommendations based on our experience with
+  ~10,000 EPIC/450k samples within Project MinE (https://www.projectmine.com/).
+Depends: R (>= 3.6.0), S4Vectors, methods
+biocViews:
+Imports:
+    shiny,
+    GGally,
+    magrittr,
+    markdown,
+    plotly,
+    irlba,
+    BiocParallel,
+    impute,
+    DT,
+    dplyr,
+    tidyr,
+    readr,
+    stringr,
+    ggplot2,
+    purrr,
+    minfi,
+    reshape2,
+    IlluminaHumanMethylation450kanno.ilmn12.hg19,
+    IlluminaHumanMethylationEPICanno.ilm10b2.hg19,
+    EpiDISH,
+    wateRmelon,
+    omicsPrint,
+    Matrix,
+    stats,
+    utils,
+    graphics,
+    hexbin,
+    GenomicRanges,
+    BiocGenerics,
+    matrixStats,
+    tibble,
+    SummarizedExperiment,
+    knitr
+Suggests:
+    minfiData,
+    testthat
+Encoding: UTF-8
+LazyData: true
+License: GPL-3
+RoxygenNote: 7.1.2

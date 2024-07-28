@@ -1,0 +1,312 @@
+---
+title: "Advanced Options"
+description: >
+  A description including examples of the available advanced options in the QC app.
+bibliography: ../app.bib
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r, include = FALSE}
+library(QCpG)
+library(dplyr)
+library(minfi)
+library(minfiData)
+
+# Processing the data
+baseDir <- system.file("extdata", package="minfiData")
+samplesheet <- read.metharray.sheet(baseDir)
+
+# The `getQCmetrics()` functions expects sex information to be coded as "M" and "F" (NA if missing) in a column named 'Sex" 
+samplesheet <- samplesheet %>%
+                    dplyr::mutate(Sample_Name =  paste(samplesheet$Slide,
+                                  samplesheet$Array, sep = "_")) %>%
+                    dplyr::rename(Sex = sex)
+```
+
+# Genotype data & relatedness
+
+## Include genotype data to detect sample swaps/contamination
+
+The 450k/EPIC arrays contain a set (±60) of probes designed to measure common genetic variants By default, within the `getQCmetrics()` function relatedness info (identity by state, IBS) is inferred from the DNA methylation using these SNPs.
+Users can also provide genotype data to check if the samples match the respective genetic data, which is useful for detecting sample swaps/contamination.
+
+The [minfiData](https://bioconductor.org/packages/release/data/experiment/html/minfiData.html) package does not include genotype data, so we'll generate some fake data, where we swap the genotypes of two samples:
+
+```{r, message = FALSE}
+# The minfidata package does not contain genetic data, so here we'll generate some fake data.
+rgset <- minfi::read.metharray(samplesheet$Basename, extended=TRUE)
+geno <- minfi::getSnpBeta(rgset)
+geno <- omicsPrint::beta2genotype(geno)
+geno <- ifelse(geno == 3, 2, ifelse(geno == 2, 1, ifelse(geno == 1, 0, NA)))
+
+# Swap a sample 
+colnames(geno) <- colnames(geno)[c(1,2,4,3,5,6)]
+
+## Run getQCmetrics function with default parameters 
+qcmetrics <- getQCmetrics(samplesheet, chunk_size = 3, geno = geno)
+
+# Inspecting the outliers shows that now two samples fail because they do not match their genotype data
+getSampleOutliers(qcmetrics) %>% dplyr::filter(IBS_outlier) 
+```
+
+## Infer SNPs
+
+In addition to the designated SNP probes, a considerable number of probes overlap with SNPs and may therefore measure genetic variation.
+These probes can be used to obtain more accurate estimations of relatedness and genotype concordance, as described in the [omicsPrint](https://bioconductor.org/packages/release/bioc/html/omicsPrint.html) package [@van_iterson_omicsprint_2018].
+We have included a set of 426 probes that accurately measure genetic variation in Project MinE data:
+
+```{r, message = FALSE}
+head(QCpG::snplinker_mine)
+```
+
+Include these probes in the `getQCmetrics()` function:
+
+```{r, message = FALSE}
+qcmetrics_nondesignatedsnps <- getQCmetrics(samplesheet, 
+                                             chunk_size = 3, 
+                                             snplinker = QCpG::snplinker_mine)
+```
+
+Note that Project MinE mainly includes mostly individuals with an European ancestry, for other ancestries other probes may work better.
+
+An example for African population using data from Zhou *et al.* [@zhou_comprehensive_2017]:
+
+```{r, message = FALSE}
+# Info on SNPs overlapping with probes from the Zhou et al. study:
+snpinfo <- readr::read_tsv("https://zhouserver.research.chop.edu/InfiniumAnnotation/20180909/HM450/HM450.hg38.commonsnp.tsv.gz")
+
+# Annotation 
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+anno <- as.data.frame(getAnnotation(IlluminaHumanMethylation450kanno.ilmn12.hg19))
+
+## Selection criteria:
+# 1. MAF > 0.05 
+# 2. SNPs in SBE site or 'C' site 
+# 3. Exclude INDELS 
+snpinfo <- snpinfo %>% dplyr::left_join(anno[,c("Name", "Type")], by = c("probeID" = "Name")) %>% 
+                       dplyr::mutate(AFR_AF = ifelse(AFR_AF > 0.5, 1 - AFR_AF, AFR_AF),
+                                        snp_probe = paste(snpID, probeID, sep = "_")) %>%
+                       dplyr::filter(!is.na(AFR_AF) & AFR_AF > 0.05) %>%
+                       dplyr::filter((Type == "II" & distance == c(-1,0)) | (Type == "I" & distance == c(0,1))) %>%
+                       dplyr::filter(stringr::str_length(snpAlt) == 1 & stringr::str_length(snpRef) == 1 & snpAlt != "-") %>%
+                       dplyr::filter(!duplicated(probeID)) %>%
+                       dplyr::select(probeID, snpID)
+
+# Run 
+qcmetrics <- getQCmetrics(samplesheet, 
+                           chunk_size = 3, 
+                           snplinker = snpinfo)
+```
+
+## Reduce size of relationship matrix
+
+The relatedness output contains N^2 rows (where N is the number of samples), and thus it will rapidly increase in size with large sample sizes. 
+To prevent `QCmetrics` objects becoming very large, the `save_all_relationships` parameter can be set to `FALSE`. In this case only the data for related samples will be saved. Note that the plot showing the relatedness among all samples can still be shown in the `QCapp()`.
+
+```{r, message = FALSE}
+qcmetrics <- getQCmetrics(samplesheet, 
+                          save_all_relationships = FALSE,
+                           snplinker = snpinfo)
+```
+
+# Principal components
+
+By default, array-wide PCA is not performed (`calculate_PCs = FALSE`), since this significantly increases the amount of working memory required.
+If you have enough RAM available, we recommend setting `calculate_PCs = TRUE`.
+RAM usage can be reduced by specifying the `n_probes_PCA` which specifies the number of most variable probes to perform PCA on.
+Control probe PCA is always performed, since it only requires a small number of probes.
+Usually, control probe PCA gives a good indication of technical variation or outliers.
+
+Perform array-wide PCA using the top 50,000 most variable probes:
+
+```{r, message = FALSE}
+# Calculate PCs, using the top 50,000 most variable probes
+qcmetrics <- getQCmetrics(samplesheet, 
+                           chunk_size = 3, 
+                           calculate_PCs = TRUE, 
+                           n_probes_PCA = 50000)
+```
+
+Both control PCs and array-wide PCs will be tested for association with available variables, which are visualized in the `QCapp()`.
+By default the variables tested are: cell type fractions, predicted age, epigenetic smoking score, epigenetic alcohol score and epigenetic BMI score.
+Additional variables to test can be specified with the `heatmap_variables` parameter.
+
+Add some technical variables:
+
+```{r, message = FALSE}
+# The 'heatmap_variables_fct' argument specifies which variables should be treated as a factor
+qcmetrics <- getQCmetrics(samplesheet, 
+                           chunk_size = 3, 
+                           calculate_PCs = TRUE, 
+                           heatmap_variables = "Slide", 
+                           heatmap_variables_fct = "Slide")
+```
+
+# QC settings and thresholds
+
+The `getQCmetrics()` function used a predefined set of thresholds to define outliers.
+(based on our experience with Project MinE data).
+These thresholds can be interactively explored and modified within the `QCapp()`, however, users can also specify custom thresholds when creating the QCmetrics (note that not all thresholds have to be specified, tunspecified thresholds will be filled with the default thresholds):
+
+```{r, message = FALSE}
+# Set a stricter MU thresholds and a less strict bscon threshold:
+qcmetrics <- getQCmetrics(samplesheet, 
+                           chunk_size = 3, 
+                           sample_qc_thresholds = list(MU = 2500, bscon = 70))
+```
+
+Two thresholds cannot be modified within the `QCapp()`: `detp_threshold` and `beadnr_threshold`.
+These thresholds define the measurements which are considered low quality, and subsequently the percentage of bad quality probes per sample and the percentage of bad quality samples per probe are calculated.
+These thresholds cannot be adjusted within the app because it would require access to the entire dataset, which is not feasible within the app.
+
+These thresholds can be adjusted when creating the `QCmetrics` however:
+
+```{r, message = FALSE}
+# Set a stricter beadnr threshold and a less strict detp threshold:
+qcmetrics <- getQCmetrics(samplesheet, 
+                           chunk_size = 3, 
+                           detp_threshold = 0.01, 
+                           beadnr_threshold = 6)
+```
+
+Another option that can be only set when creating the QCmetrics object is the `probe_qc_method`.
+This parameter controls whether probe QC should be performed *after* or *before* removing samples that fail based on sample QC.
+By default, probe QC is performed *after* removing sample outliers.
+This can be changed as follows:
+
+```{r, message = FALSE}
+# Perform probe QC before removing sample outliers
+qcmetrics <- getQCmetrics(samplesheet, 
+                           chunk_size = 3, 
+                           probe_qc_method = "pre_sampleqc")
+```
+
+# Combining QCmetrics objects
+
+`QCmetric` objects can be combined using the `combineQCmetrics()` method.
+Note that array-wide PCs (if present) and relatedness data are dropped when combined.
+Control probe PCs are recalculated, and are thus included in the combined object.
+
+```{r, message = FALSE}
+qcmetrics <- getQCmetrics(samplesheet, 
+                           chunk_size = 3, 
+                           calculate_PCs = TRUE)
+
+qcmetrics1 <- getQCmetrics(samplesheet[1:3,], 
+                            chunk_size = 3, 
+                            calculate_PCs = TRUE)
+
+qcmetrics2 <- getQCmetrics(samplesheet[4:6,], 
+                            chunk_size = 3, 
+                            calculate_PCs = TRUE)
+
+qcmetrics_combined <- combineQCmetrics(qcmetrics1, 
+                                       qcmetrics2,
+                                       name = "combined QCmetrics")
+
+# Test if running all data together or running separately and then combine result in same object
+identical(qcmetrics_combined@Sample_Metrics, qcmetrics@Sample_Metrics)
+```
+
+Note that `combineQCmetrics` performs several checks to make sure that the `QCmetrics` objects can be combined. These include (among others), a check whether the same thresholds are used in the objects and whether they were created using the same package version. For example: 
+
+```{r, error=TRUE}
+qcmetrics1 <- getQCmetrics(samplesheet[1:3,], 
+                            chunk_size = 3, 
+                            calculate_PCs = TRUE,probe_qc_method = "pre_sampleqc")
+
+qcmetrics2 <- getQCmetrics(samplesheet[4:6,], 
+                            chunk_size = 3, 
+                            calculate_PCs = TRUE)
+
+qcmetrics_combined <- combineQCmetrics(qcmetrics1, 
+                                       qcmetrics2,
+                                       name = "combined QCmetrics")
+```
+If you do want to proceed combining the objects the `force` parameter can be set to TRUE:
+
+```{r, error = FALSE, message = FALSE}
+qcmetrics_combined <- combineQCmetrics(qcmetrics1, 
+                                       qcmetrics2,
+                                       name = "combined QCmetrics",
+                                       force = TRUE)
+```
+
+
+# Parallelization
+
+The `getQCmetrics()` function can be parallelized by specifying the `cores` parameter, in which case the BiocConductor [BiocParallel](https://bioconductor.org/packages/release/bioc/html/BiocParallel.html) package is used to distribute tasks.
+
+```{r, message = FALSE}
+# Check number of cores available:
+parallel::detectCores()
+```
+
+```{r, message = FALSE}
+# Run in parallel and check run time
+time1_parallel <- Sys.time()
+qcmetrics_parallel <- getQCmetrics(samplesheet,
+                                    chunk_size = 2,
+                                    cores = 2)
+time2_parallel <- Sys.time()
+
+time2_parallel-time1_parallel
+
+# Run single-threaded and check run time
+time1 <- Sys.time()
+qcmetrics <- getQCmetrics(samplesheet,
+                           chunk_size = 2,
+                           cores = 1)
+time2 <- Sys.time()
+time2 -  time1
+```
+
+By default, the `BiocParallel::MulticoreParam()` backend is used, which works well on non-Windows computers.
+On Windows computers or cluster computers other backends (such as `BiocParallel::SnowParam()`) can be specified using the `BPPARAM` parameter, see for more information.
+
+```{r, message = FALSE, eval = FALSE}
+# Use Snow backend
+qcmetrics <- getQCmetrics(samplesheet,
+                           chunk_size = 2,
+                           cores = 2,
+                           BPPARAM = BiocParallel::SnowParam(workers = 2, type = "SOCK"))
+```
+
+# Masking low-quality measurements 
+
+The `path_failed_measurements` parameter in `getQCmetrics()` allows for saving  a sparse matrix that indicates for each measurement whether it is of low quality (based on the detp_threshold (default=1e-16) and beadnr_threshold (default=3)). This matrix can bed used to mask low-quality measurements in the beta-matrix using the `mask_measurements()` function.
+
+First, we'll generate QCmetrics while saving the matrix indicating low-quality measurements:
+
+```{r, message = FALSE}
+qcmetrics <- getQCmetrics(samplesheet,
+                           calculate_PCs = TRUE,
+                           path_failed_measurements = "../tmp/mask_measurements.rds"
+                           )
+```
+
+Save example betas to mask measurements in:
+```{r}
+rgset <- read.metharray(samplesheet$Basename, extended=TRUE)
+beta <- getBeta(rgset)
+readr::write_tsv(as.data.frame(cbind(Probe = rownames(beta), beta)),"../tmp/beta.txt")
+```
+
+Mask measurements using the `mask_measurements()` function:
+```{r}
+mask_matrix <- readRDS("../tmp/mask_measurements.rds")
+mask_measurements(beta = "../tmp/beta.txt", output = "../tmp/beta_masked.txt", mask_matrix = mask_matrix )
+beta_masked <- readr::read_tsv("../tmp/beta_masked.txt")
+sum(is.na(beta_masked))
+```
+
+# References

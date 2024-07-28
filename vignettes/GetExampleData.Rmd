@@ -1,0 +1,96 @@
+---
+title: "Get example data"
+output: html_document
+bibliography: ../app.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+To demonstrate the package, we use DNA methylation data (450k array) deposited on GEO ([GSE42861](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE42861 "GSE42861")) [@liu_epigenome-wide_2013]. This dataset includes 450k data profiled from peripheral blood leukocyte (PBL) samples of 354 rheumatoid arthritis patiets and 335 controls. For this tutorial we'll use a subset of \~150 samples from this dataset.
+
+# Download files
+
+The files can be downloaded using the [GEOquery](https://www.bioconductor.org/packages/release/bioc/html/GEOquery.html "GEOquery") BioConductor R package.
+
+```{r, eval = FALSE}
+## Set directory
+outdir <- "../GSE42861"
+
+# Libraries 
+library(dplyr)
+library(magrittr)
+library(stringr)
+
+# Load samplesheet (using some very useful code included in the meffil package)
+source("https://raw.githubusercontent.com/perishky/meffil/master/data-raw/geo.r")
+samplesheet <- geo.samples("GSE42861")
+
+# Format samplesheet 
+
+## Get sample characteristics
+dat <- stringr::str_split(samplesheet$characteristics_ch1, pattern=";", simplify=TRUE)
+
+### Extract sample characteristics from `characteristics_ch1` column
+characteristics <- list()
+for(i in 1:ncol(dat)) {
+  column_name <- stringr::str_trim(stringr::str_split(dat[,i], pattern=":", simplify=TRUE)[,1]) %>% unique()
+  column_name <- stringr::str_replace(column_name, pattern=" ", replacement = "_")
+  x <- stringr::str_trim(stringr::str_split(dat[,i], pattern=":", simplify=TRUE)[,2])
+  tib <- tibble(x)
+  colnames(tib) <- column_name
+  characteristics[[i]] <- tib
+}
+characteristics <- dplyr::bind_cols(characteristics)
+
+### Add 'Sample_Name' 
+Sample_Name <- stringr::str_split(samplesheet$supplementary_file,
+                                  pattern="/", simplify=TRUE)
+Sample_Name <- Sample_Name[,ncol(Sample_Name)]
+Sample_Name <- paste(stringr::str_split(Sample_Name, pattern="_", simplify=TRUE)[,1],
+                     stringr::str_split(Sample_Name, pattern="_", simplify=TRUE)[,2],
+                     stringr::str_split(Sample_Name, pattern="_", simplify=TRUE)[,3],
+                     sep = "_")
+
+### Combine 
+samplesheet <- dplyr::bind_cols(tibble(Sample_Name = Sample_Name), 
+                                characteristics, 
+                                geo_accession = samplesheet$geo_accession)
+
+### Add 'Basename' column -> path to IDAT files
+samplesheet$Basename <- sprintf("%s/IDATs/%s", outdir, samplesheet$Sample_Name)
+
+## Format column names 
+samplesheet <- samplesheet %>%
+  dplyr::mutate(
+    Sex = toupper(gender),
+    age = as.numeric(age),
+    smoking_status = ifelse(smoking_status == "na", NA, smoking_status),
+    Slide = stringr::str_split(Sample_Name,pattern="_",simplify=TRUE)[,2]
+  ) %>%
+  dplyr::rename(Smoking_Status = smoking_status, Age=age) %>%
+  dplyr::select(-gender)
+
+## Subset 
+### For example purposes we'll use a subset of the data
+
+slides_select <- c("7800246071", "5730053011", "573005038", "5730053041", "7800246085",
+                   "7800246087", "7800246123", "7800246132", "7800246137",
+                   
+                   "5730192045", "5730053030", "5730053040", "5765205058", "5730192048", "7512560115", "5730053039")
+samplesheet <- samplesheet %>%
+  dplyr::filter(Slide %in% slides_select)
+
+saveRDS(samplesheet, file=sprintf("%s/samplesheet_GSE42861.rds", outdir))
+
+## Download IDAT files 
+dir.create(sprintf("%s/IDATs", outdir), recursive=TRUE)
+for(gsm in samplesheet$geo_accession) {
+  getGEOSuppFiles(gsm, baseDir = sprintf("%s/IDATs", outdir), makeDirectory = FALSE)
+}
+
+# metrics <- get_qcmetrics(samplesheet)
+# 
+# QCapp(metrics, samplesheet=samplesheet %>% dplyr::mutate(Age=as.numeric(Age)))
+```
